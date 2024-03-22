@@ -13,6 +13,9 @@ pub struct ProductExportData {
     name: String,
     fullname: String,
     description: String,
+    short_description: String,
+    brand: String,
+    flags: Vec<i32>,
 }
 
 #[derive(Clone)]
@@ -20,11 +23,13 @@ pub struct ProductIndex {
     pool: Pool<Postgres>,
 }
 
+#[derive(Debug)]
 pub struct ProductForElasticExport {
     pub id: i32,
     pub catnum: String,
     pub partno: Option<String>,
     pub ean: Option<String>,
+    pub brand_id: Option<i32>,
 }
 
 #[derive(Default)]
@@ -36,8 +41,10 @@ pub struct ProductTranslationForElasticExport {
 
 #[derive(Default)]
 pub struct ProductDomainForElasticExport {
+    id: i32,
     domain_id: i32,
     description: Option<String>,
+    short_description: Option<String>,
 }
 
 impl ProductIndex {
@@ -70,6 +77,16 @@ impl ProductIndex {
 
             let product_translation = self.get_product_translation(product.id).await;
             let product_domain = self.get_product_domain(product.id).await;
+            let default_pricing_group_id = 1; // todo: vytahnout ze settings
+            let variants = self
+                .get_sellable_variants(product.id, 1, default_pricing_group_id)
+                .await;
+            let product_ids = variants
+                .iter()
+                .map(|p| p.id)
+                .chain(std::iter::once(product.id))
+                .collect();
+            let flag_ids = self.extract_flags_for_domain(product_ids, domain_id).await;
 
             results.insert(
                 product.id,
@@ -92,6 +109,9 @@ impl ProductIndex {
                         product_translation.name_sufix.unwrap_or_default()
                     ),
                     description: product_domain.description.unwrap_or_default(), // nutnost použití take() bylo tímto "Error - Borrow of partially moved value: 'product'"
+                    short_description: product_domain.short_description.unwrap_or_default(),
+                    brand: product.brand_id.map_or("".to_string(), |i| i.to_string()),
+                    flags: flag_ids,
                 },
             );
         }
@@ -141,7 +161,7 @@ impl ProductIndex {
         sqlx::query_as!(
             ProductForElasticExport,
             r#"
-            SELECT p.id, p.catnum, p.partno, p.ean
+            SELECT p.id, p.catnum, p.partno, p.ean, p.brand_id
             FROM products p
             INNER JOIN product_visibilities pv ON p.id = pv.product_id
             WHERE pv.domain_id = $1 AND pv.visible = TRUE AND p.id > $2 AND pv.product_id > $3
@@ -269,12 +289,65 @@ impl ProductIndex {
     pub async fn get_product_domain(&self, product_id: i32) -> ProductDomainForElasticExport {
         sqlx::query_as!(
             ProductDomainForElasticExport,
-            r#"SELECT domain_id, description
+            r#"SELECT id, domain_id, description, short_description
             FROM product_domains
             WHERE product_id = $1 AND domain_id = 1"#,
             product_id
         )
         .fetch_one(&self.pool)
+        .await
+        .unwrap_or_default()
+    }
+
+    // V php musi udelat select * a vytahnout jen "idcka"
+    // SELECT t0.akeneo_code AS akeneo_code_1, t0.id AS id_2,t0.uuid AS uuid_3, t0.rgb_color AS rgb_color_4, t0.visible AS visible_5
+    // FROM flags t0
+    // INNER JOIN product_domain_flags ON t0.id = product_domain_flags.flag_id
+    // WHERE product_domain_flags.product_domain_id = $1
+    pub async fn extract_flags_for_domain(&self, product_ids: Vec<i32>, domain_id: u8) -> Vec<i32> {
+        sqlx::query!(
+            r#"
+            SELECT DISTINCT(pdf.flag_id)
+            FROM product_domains pd
+            INNER JOIN product_domain_flags pdf ON pdf.product_domain_id = pd.id
+            WHERE pd.product_id = ANY ($1) AND pd.domain_id = $2;
+            "#,
+            &product_ids,
+            domain_id as i32
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.flag_id)
+        .collect()
+    }
+
+    async fn get_sellable_variants(
+        &self,
+        main_variant_id: i32,
+        domain_id: u8,
+        pricing_group_id: i32,
+    ) -> Vec<ProductForElasticExport> {
+        sqlx::query_as!(
+            ProductForElasticExport,
+            r#"SELECT p.id, p.catnum, p.partno, p.ean, p.brand_id
+            FROM products p 
+            INNER JOIN product_visibilities pv ON p.id = pv.product_id  
+            WHERE pv.domain_id = $1
+            AND pv.pricing_group_id = $2
+            AND pv.visible = TRUE
+            AND p.calculated_selling_denied = FALSE
+            AND p.variant_type != $3
+            AND p.main_variant_id = $4
+            ORDER BY p.id
+            "#,
+            domain_id as i32,
+            pricing_group_id,
+            "main",
+            main_variant_id
+        )
+        .fetch_all(&self.pool)
         .await
         .unwrap_or_default()
     }
