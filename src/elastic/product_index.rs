@@ -43,10 +43,10 @@ pub struct ProductTranslationForElasticExport {
 
 #[derive(Default)]
 pub struct ProductDomainForElasticExport {
-    id: i32,
-    domain_id: i32,
-    description: Option<String>,
-    short_description: Option<String>,
+    pub id: i32,
+    pub domain_id: i32,
+    pub description: Option<String>,
+    pub short_description: Option<String>,
 }
 
 #[derive(Default)]

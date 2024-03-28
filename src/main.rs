@@ -7,7 +7,9 @@ mod utils;
 
 use crate::elastic::index_facade::IndexFacade;
 use crate::elastic::index_repository::IndexRepository;
-use crate::elastic::product_index::ProductIndex;
+use crate::elastic::product_index::{
+    ProductDomainForElasticExport, ProductForElasticExport, ProductIndex,
+};
 use crate::postgres::postgres_connect;
 use crate::product::product_repository;
 use dotenvy::dotenv;
@@ -17,7 +19,7 @@ use elasticsearch::indices::{
 };
 use elasticsearch::Elasticsearch;
 use serde_json::Value;
-use sqlx::{Connection, FromRow, Row};
+use sqlx::{Connection, FromRow, Pool, Postgres, Row};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -94,6 +96,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
+    dotenv().expect(".env file not found");
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -116,14 +119,33 @@ async fn main() {
 }
 
 async fn greet(extract::Path(name): extract::Path<String>) -> impl IntoResponse {
-    let template = HelloTemplate { name };
+    let pool = postgres::postgres_connect::get_pool().await;
+    let products = get_products(pool.clone(), 1, 1, 10000).await;
+    let mut products_for_template = vec![];
+    for product in products {
+        let product_id = product.id;
+        products_for_template.push(ProductForTemplate {
+            product,
+            description: get_product_domain(pool.clone(), product_id)
+                .await
+                .description,
+        })
+    }
+    let template = HelloTemplate {
+        products: products_for_template,
+    };
     HtmlTemplate(template)
+}
+
+struct ProductForTemplate {
+    product: ProductForElasticExport,
+    description: Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "hello.askama.html")]
 struct HelloTemplate {
-    name: String,
+    products: Vec<ProductForTemplate>,
 }
 
 struct HtmlTemplate<T>(T);
@@ -142,6 +164,49 @@ where
                 .into_response(),
         }
     }
+}
+
+async fn get_products(
+    pool: Pool<Postgres>,
+    domain_id: u8,
+    last_processed_id: u32,
+    batch_size: u32,
+) -> Vec<ProductForElasticExport> {
+    sqlx::query_as!(
+        ProductForElasticExport,
+        r#"
+            SELECT p.id, p.catnum, p.partno, p.ean, p.brand_id
+            FROM products p
+            INNER JOIN product_visibilities pv ON p.id = pv.product_id
+            WHERE pv.domain_id = $1 AND pv.visible = TRUE AND p.id > $2 AND pv.product_id > $3
+            GROUP BY p.id
+            ORDER BY p.id
+            LIMIT $4
+            "#,
+        domain_id as i32,
+        last_processed_id as i32,
+        last_processed_id as i32,
+        batch_size as i32
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default()
+}
+
+pub async fn get_product_domain(
+    pool: Pool<Postgres>,
+    product_id: i32,
+) -> ProductDomainForElasticExport {
+    sqlx::query_as!(
+        ProductDomainForElasticExport,
+        r#"SELECT id, domain_id, description, short_description
+            FROM product_domains
+            WHERE product_id = $1 AND domain_id = 1"#,
+        product_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or_default()
 }
 
 #[tokio::main]

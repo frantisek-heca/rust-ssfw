@@ -3,7 +3,14 @@
 {% block main_content %}
 <div class="web__line">
     <div class="web__container">
-        {{ name }}
+        {% for item in products %}
+           {{ item.product.id }} | {{ item.product.catnum }} |
+           {% match item.product.partno %}{% when Some with (val) %}{{ val }}{% when None %}{% endmatch %} |
+           {% match item.description %}{% when Some with (val) %}{{ val|safe }}{% when None %}{% endmatch %} |
+           {% match item.product.ean %}{% when Some with (val) %}{{ val }}{% when None %}{% endmatch %} |
+           {% match item.product.brand_id %}{% when Some with (val) %}{{ val }}{% when None %}{% endmatch %}
+           <br>
+        {% endfor %}
     </div>
 </div>
 {% endblock %}
