@@ -1,0 +1,32 @@
+{% extends "layout.askama.html" %}
+
+{% block content %}
+    <div class="web__main">
+        <div class="web__main__content js-main-content {% block web_main_content_class %}{% endblock %}">
+            {% block background_advert %}{% endblock %}
+
+            {% block breadcrumb %}
+                {# {{ render(controller('App\\Controller\\Front\\BreadcrumbController:indexAction', { routeName: getRoute(),
+        routeParameters: getRouteParams() } )) }} #}
+            {% endblock %}
+
+            <div class="web__line">
+                <div class="web__container">
+                    {% block flashMessage %}
+                        {# {{ render(controller('App\\Controller\\Front\\FlashMessageController:indexAction')) }} #}
+                    {% endblock %}
+                </div>
+            </div>
+
+            {% block main_content %}{% endblock %}
+            {% block lastVisitedProducts %}
+                {#
+                <div data-gtm-list="{{ constant('App\\Model\\Gtm\\Data\\DataLayerActionField::LIST_LAST_VISITED_URL') }}"> #}
+                {# {{ lastVisitedProducts(app.request) }} #}
+                {#
+                </div>
+                #}
+            {% endblock %}
+        </div>
+    </div>
+{% endblock %}

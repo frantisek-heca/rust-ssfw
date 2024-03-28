@@ -103,7 +103,9 @@ async fn main() {
         .init();
 
     // build our application with some routes
-    let app = Router::new().route("/greet/:name", get(greet));
+    let app = Router::new()
+        .route("/greet/:name", get(greet))
+        .nest_service("/assets", tower_http::services::ServeDir::new("assets"));
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -119,7 +121,7 @@ async fn greet(extract::Path(name): extract::Path<String>) -> impl IntoResponse 
 }
 
 #[derive(Template)]
-#[template(path = "hello.html")]
+#[template(path = "hello.askama.html")]
 struct HelloTemplate {
     name: String,
 }
