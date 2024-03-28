@@ -1,3 +1,4 @@
+mod discord_experiment;
 pub mod error;
 pub mod index_definition;
 pub mod index_definition_loader;

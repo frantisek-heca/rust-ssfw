@@ -1,3 +1,4 @@
+use crate::elastic::discord_experiment::get_discord;
 use crate::product::product::ProductTranslation;
 use crate::product::product::{Product, ProductDomain};
 use serde::Serialize;
@@ -82,6 +83,8 @@ impl ProductIndex {
 
             // product.with_translation(self.pool.clone()).await;
             // product.with_domain(self.pool.clone()).await;
+
+            get_discord(self.pool.clone()).await;
 
             let product_translation = self.get_product_translation(product.id).await;
             let product_domain = self.get_product_domain(product.id).await;
