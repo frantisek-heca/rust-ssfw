@@ -16,6 +16,7 @@ pub struct ProductExportData {
     short_description: String,
     brand: String,
     flags: Vec<i32>,
+    categories: Vec<i32>,
 }
 
 #[derive(Clone)]
@@ -45,6 +46,13 @@ pub struct ProductDomainForElasticExport {
     domain_id: i32,
     description: Option<String>,
     short_description: Option<String>,
+}
+
+#[derive(Default)]
+pub struct MainCategory {
+    id: i32,
+    lft: i32,
+    rgt: i32,
 }
 
 impl ProductIndex {
@@ -87,6 +95,8 @@ impl ProductIndex {
                 .chain(std::iter::once(product.id))
                 .collect();
             let flag_ids = self.extract_flags_for_domain(product_ids, domain_id).await;
+            let main_category = self.get_product_main_category_by_domain_id(product.id, domain_id);
+            let category_ids = self.get_category_ids(product.id, domain_id).await;
 
             results.insert(
                 product.id,
@@ -112,8 +122,11 @@ impl ProductIndex {
                     short_description: product_domain.short_description.unwrap_or_default(),
                     brand: product.brand_id.map_or("".to_string(), |i| i.to_string()),
                     flags: flag_ids,
+                    categories: category_ids,
                 },
             );
+            // dbg!(results);
+            // panic!();
         }
 
         results
@@ -351,4 +364,87 @@ impl ProductIndex {
         .await
         .unwrap_or_default()
     }
+
+    pub async fn get_product_main_category_by_domain_id(
+        &self,
+        product_id: i32,
+        domain_id: u8,
+    ) -> MainCategory {
+        sqlx::query_as!(
+            MainCategory,
+            r#"
+            SELECT c.id, c.lft, c.rgt FROM categories c
+            INNER JOIN category_domains cd ON cd.category_id = c.id
+            INNER JOIN product_category_domains pcd ON (pcd.product_id = $1 AND pcd.category_id = c.id AND pcd.domain_id = $2)
+            WHERE c.parent_id IS NOT NULL
+            AND cd.domain_id = $3
+            AND cd.visible = TRUE
+            ORDER BY c.level DESC, c.lft ASC
+            LIMIT 1
+            "#,
+            product_id,
+            domain_id as i32,
+            domain_id as i32
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or_default()
+    }
+
+    pub async fn get_category_ids(&self, product_id: i32, domain_id: u8) -> Vec<i32> {
+        sqlx::query!(
+            r#"
+            SELECT category_id 
+            FROM product_category_domains 
+            WHERE product_id = $1 AND domain_id = $2
+            "#,
+            product_id,
+            domain_id as i32
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.category_id)
+        .collect()
+    }
+
+    // category_ids = extractCategories
+    // SELECT category_id FROM product_category_domains WHERE product_id = 349625 AND domain_id = 1;
+
+    // main_category_id = getProductMainCategoryByDomainId
+    // SELECT c0_.akeneo_code                AS akeneo_code_0,
+    //        c0_.svg_icon                   AS svg_icon_1,
+    //        c0_.over_limit_quantity        AS over_limit_quantity_2,
+    //        c0_.old_shoptet_id             AS old_shoptet_id_3,
+    //        c0_.pairing_category_path      AS pairing_category_path_4,
+    //        c0_.paired                     AS paired_5,
+    //        c0_.exclude_from_facebook_feed AS exclude_from_facebook_feed_6,
+    //        c0_.id                         AS id_7,
+    //        c0_.uuid                       AS uuid_8,
+    //        c0_.level                      AS level_9,
+    //        c0_.lft                        AS lft_10,
+    //        c0_.rgt                        AS rgt_11,
+    //        c0_.google_category_id         AS google_category_id_12,
+    //        c0_.redirect_category_id       AS redirect_category_id_13,
+    //        c0_.zbozi_category_id          AS zbozi_category_id_14,
+    //        c0_.parent_id                  AS parent_id_15
+    // FROM categories c0_
+    //          INNER JOIN category_domains c1_ ON (c1_.category_id = c0_.id)
+    //          INNER JOIN product_category_domains p2_ ON (p2_.product_id = 349625 AND p2_.category_id = c0_.id AND p2_.domain_id = 1)
+    // WHERE c0_.parent_id IS NOT NULL
+    //   AND c1_.domain_id = 1
+    //   AND c1_.visible = true
+    // ORDER BY c0_.level DESC, c0_.lft ASC
+    // LIMIT 1;
+
+    // main_category - bude stacit id, lft, rgt
+    // SELECT * FROM categories c
+    // INNER JOIN category_domains cd ON cd.category_id = c.id
+    // INNER JOIN product_category_domains pcd ON (pcd.product_id = 3 AND pcd.category_id = c.id AND pcd.domain_id = 1)
+    // WHERE c.parent_id IS NOT NULL
+    // AND cd.domain_id = 1
+    // AND cd.visible = TRUE
+    // ORDER BY c.level DESC, c.lft ASC
+    // LIMIT 1;
 }
