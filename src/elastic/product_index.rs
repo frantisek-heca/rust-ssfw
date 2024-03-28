@@ -134,7 +134,6 @@ impl ProductIndex {
 
         results
     }
-
     ///
     /// Tato verze, kde rovnou joinuju product_translations je mega pomala, cca 0.8s jeden dotaz
     /// - zpusobil to proste ten join
